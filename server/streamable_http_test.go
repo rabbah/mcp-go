@@ -55,17 +55,11 @@ func addSSETool(mcpServer *MCPServer) {
 
 func TestStreamableHTTPServerBasic(t *testing.T) {
 	t.Run("Can instantiate", func(t *testing.T) {
-		mcpServer := NewMCPServer("test", "1.0.0")
-		httpServer := NewStreamableHTTPServer(mcpServer,
-			WithEndpointPath("/mcp"),
-		)
+		httpServer := NewStreamableHTTPServer(WithEndpointPath("/mcp"))
 
 		if httpServer == nil {
 			t.Error("SSEServer should not be nil")
 		} else {
-			if httpServer.server == nil {
-				t.Error("MCPServer should not be nil")
-			}
 			if httpServer.endpointPath != "/mcp" {
 				t.Errorf(
 					"Expected endpointPath /mcp, got %s",
@@ -496,7 +490,12 @@ func TestStreamableHTTP_GET(t *testing.T) {
 func TestStreamableHTTP_HttpHandler(t *testing.T) {
 	t.Run("Works with custom mux", func(t *testing.T) {
 		mcpServer := NewMCPServer("test", "1.0.0")
-		server := NewStreamableHTTPServer(mcpServer)
+		httpServer := NewStreamableHTTPServer()
+
+		server := &StreamableHTTPServerHandler{
+			mcpServer:  mcpServer,
+			httpServer: httpServer,
+		}
 
 		mux := http.NewServeMux()
 		mux.Handle("/mypath", server)
@@ -672,9 +671,9 @@ func TestStreamableHTTP_SessionWithTools(t *testing.T) {
 
 func TestStreamableHTTPServer_WithOptions(t *testing.T) {
 	t.Run("WithStreamableHTTPServer sets httpServer field", func(t *testing.T) {
-		mcpServer := NewMCPServer("test", "1.0.0")
 		customServer := &http.Server{Addr: ":9999"}
-		httpServer := NewStreamableHTTPServer(mcpServer, WithStreamableHTTPServer(customServer))
+
+		httpServer := NewStreamableHTTPServer(WithStreamableHTTPServer(customServer))
 
 		if httpServer.httpServer != customServer {
 			t.Errorf("Expected httpServer to be set to custom server instance, got %v", httpServer.httpServer)
@@ -684,9 +683,14 @@ func TestStreamableHTTPServer_WithOptions(t *testing.T) {
 	t.Run("Start with conflicting address returns error", func(t *testing.T) {
 		mcpServer := NewMCPServer("test", "1.0.0")
 		customServer := &http.Server{Addr: ":9999"}
-		httpServer := NewStreamableHTTPServer(mcpServer, WithStreamableHTTPServer(customServer))
+		httpServer := NewStreamableHTTPServer(WithStreamableHTTPServer(customServer))
 
-		err := httpServer.Start(":8888")
+		serverHandler := &StreamableHTTPServerHandler{
+			mcpServer:  mcpServer,
+			httpServer: httpServer,
+		}
+
+		err := serverHandler.Start(":8888")
 		if err == nil {
 			t.Error("Expected error for conflicting address, got nil")
 		} else if !strings.Contains(err.Error(), "conflicting listen address") {
@@ -695,7 +699,6 @@ func TestStreamableHTTPServer_WithOptions(t *testing.T) {
 	})
 
 	t.Run("Options consistency test", func(t *testing.T) {
-		mcpServer := NewMCPServer("test", "1.0.0")
 		endpointPath := "/test-mcp"
 		customServer := &http.Server{}
 
@@ -707,7 +710,7 @@ func TestStreamableHTTPServer_WithOptions(t *testing.T) {
 
 		// Apply options multiple times and verify consistency
 		for i := 0; i < 10; i++ {
-			server := NewStreamableHTTPServer(mcpServer, options...)
+			server := NewStreamableHTTPServer(options...)
 
 			if server.endpointPath != endpointPath {
 				t.Errorf("Expected endpointPath %s, got %s", endpointPath, server.endpointPath)

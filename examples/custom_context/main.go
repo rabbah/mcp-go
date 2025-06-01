@@ -123,9 +123,7 @@ func NewMCPServer() *MCPServer {
 }
 
 func (s *MCPServer) ServeHTTP() *server.StreamableHTTPServer {
-	return server.NewStreamableHTTPServer(s.server,
-		server.WithHTTPContextFunc(authFromRequest),
-	)
+	return server.NewStreamableHTTPServer(server.WithHTTPContextFunc(authFromRequest))
 }
 
 func (s *MCPServer) ServeStdio() error {
@@ -153,7 +151,15 @@ func main() {
 	case "http":
 		httpServer := s.ServeHTTP()
 		log.Printf("HTTP server listening on :8080")
-		if err := httpServer.Start(":8080"); err != nil {
+		mcpServer := server.NewMCPServer(
+			"example-server",
+			"1.0.0",
+			server.WithResourceCapabilities(true, true),
+			server.WithPromptCapabilities(true),
+			server.WithToolCapabilities(true),
+		)
+		serverHandler := server.MakeStreamableHTTPServerHandler(mcpServer, httpServer)
+		if err := serverHandler.Start(":8080"); err != nil {
 			log.Fatalf("Server error: %v", err)
 		}
 	default:

@@ -483,9 +483,10 @@ func main() {
 
 	// Only check for "http" since stdio is the default
 	if transport == "http" {
-		httpServer := server.NewStreamableHTTPServer(mcpServer)
+		httpServer := server.NewStreamableHTTPServer()
 		log.Printf("HTTP server listening on :8080/mcp")
-		if err := httpServer.Start(":8080"); err != nil {
+		serverHandler := server.MakeStreamableHTTPServerHandler(mcpServer, httpServer)
+		if err := serverHandler.Start(":8080"); err != nil {
 			log.Fatalf("Server error: %v", err)
 		}
 	} else {
