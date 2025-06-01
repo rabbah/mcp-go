@@ -1,4 +1,10 @@
 <!-- omit in toc -->
+
+<strong>
+This is a fork of https://github.com/mark3labs/mcp-go that allows for some customizations of the MCP server handling needed to enable Postman Flows actions as MCP servers.
+The changes are kept to a minimum to make it easier to track upstream changes.
+</strong>
+
 <div align="center">
 <img src="./logo.png" alt="MCP Go Logo">
 

@@ -127,7 +127,7 @@ func WithTLSCert(certFile, keyFile string) StreamableHTTPOption {
 // The current implementation does not support the following features from the specification:
 //   - Stream Resumability
 type StreamableHTTPServer struct {
-	server            *MCPServer
+	//server          *MCPServer
 	sessionTools      *sessionToolsStore
 	sessionRequestIDs sync.Map // sessionId --> last requestID(*atomic.Int64)
 	activeSessions    sync.Map // sessionId --> *streamableHttpSession (for sampling responses)
@@ -146,10 +146,22 @@ type StreamableHTTPServer struct {
 	tlsKeyFile  string
 }
 
+type StreamableHTTPServerHandler struct {
+	mcpServer  *MCPServer
+	httpServer *StreamableHTTPServer
+}
+
+func MakeStreamableHTTPServerHandler(mcpServer *MCPServer, httpServer *StreamableHTTPServer) *StreamableHTTPServerHandler {
+	return &StreamableHTTPServerHandler{
+		mcpServer:  mcpServer,
+		httpServer: httpServer,
+	}
+}
+
 // NewStreamableHTTPServer creates a new streamable-http server instance
-func NewStreamableHTTPServer(server *MCPServer, opts ...StreamableHTTPOption) *StreamableHTTPServer {
+func NewStreamableHTTPServer( /*server *MCPServer,*/ opts ...StreamableHTTPOption) *StreamableHTTPServer {
 	s := &StreamableHTTPServer{
-		server:           server,
+		//server:         server,
 		sessionTools:     newSessionToolsStore(),
 		sessionLogLevels: newSessionLogLevelsStore(),
 		endpointPath:     "/mcp",
@@ -165,14 +177,14 @@ func NewStreamableHTTPServer(server *MCPServer, opts ...StreamableHTTPOption) *S
 }
 
 // ServeHTTP implements the http.Handler interface.
-func (s *StreamableHTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (s *StreamableHTTPServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
-		s.handlePost(w, r)
+		s.httpServer.handlePost(s.mcpServer, w, r)
 	case http.MethodGet:
-		s.handleGet(w, r)
+		s.httpServer.handleGet(s.mcpServer, w, r)
 	case http.MethodDelete:
-		s.handleDelete(w, r)
+		s.httpServer.handleDelete(w, r)
 	default:
 		http.NotFound(w, r)
 	}
@@ -182,36 +194,36 @@ func (s *StreamableHTTPServer) ServeHTTP(w http.ResponseWriter, r *http.Request)
 // (endpointPath). like:
 //
 //	s.Start(":8080")
-func (s *StreamableHTTPServer) Start(addr string) error {
-	s.mu.Lock()
-	if s.httpServer == nil {
+func (s *StreamableHTTPServerHandler) Start(addr string) error {
+	s.httpServer.mu.Lock()
+	if s.httpServer.httpServer == nil {
 		mux := http.NewServeMux()
-		mux.Handle(s.endpointPath, s)
-		s.httpServer = &http.Server{
+		mux.Handle(s.httpServer.endpointPath, s)
+		s.httpServer.httpServer = &http.Server{
 			Addr:    addr,
 			Handler: mux,
 		}
 	} else {
-		if s.httpServer.Addr == "" {
-			s.httpServer.Addr = addr
-		} else if s.httpServer.Addr != addr {
-			return fmt.Errorf("conflicting listen address: WithStreamableHTTPServer(%q) vs Start(%q)", s.httpServer.Addr, addr)
+		if s.httpServer.httpServer.Addr == "" {
+			s.httpServer.httpServer.Addr = addr
+		} else if s.httpServer.httpServer.Addr != addr {
+			return fmt.Errorf("conflicting listen address: WithStreamableHTTPServer(%q) vs Start(%q)", s.httpServer.httpServer.Addr, addr)
 		}
 	}
-	srv := s.httpServer
-	s.mu.Unlock()
+	srv := s.httpServer.httpServer
+	s.httpServer.mu.Unlock()
 
-	if s.tlsCertFile != "" || s.tlsKeyFile != "" {
-		if s.tlsCertFile == "" || s.tlsKeyFile == "" {
+	if s.httpServer.tlsCertFile != "" || s.httpServer.tlsKeyFile != "" {
+		if s.httpServer.tlsCertFile == "" || s.httpServer.tlsKeyFile == "" {
 			return fmt.Errorf("both TLS cert and key must be provided")
 		}
-		if _, err := os.Stat(s.tlsCertFile); err != nil {
+		if _, err := os.Stat(s.httpServer.tlsCertFile); err != nil {
 			return fmt.Errorf("failed to find TLS certificate file: %w", err)
 		}
-		if _, err := os.Stat(s.tlsKeyFile); err != nil {
+		if _, err := os.Stat(s.httpServer.tlsKeyFile); err != nil {
 			return fmt.Errorf("failed to find TLS key file: %w", err)
 		}
-		return srv.ListenAndServeTLS(s.tlsCertFile, s.tlsKeyFile)
+		return srv.ListenAndServeTLS(s.httpServer.tlsCertFile, s.httpServer.tlsKeyFile)
 	}
 
 	return srv.ListenAndServe()
@@ -233,7 +245,11 @@ func (s *StreamableHTTPServer) Shutdown(ctx context.Context) error {
 
 // --- internal methods ---
 
-func (s *StreamableHTTPServer) handlePost(w http.ResponseWriter, r *http.Request) {
+const (
+	headerKeySessionID = "Mcp-Session-Id"
+)
+
+func (s *StreamableHTTPServer) handlePost(server *MCPServer, w http.ResponseWriter, r *http.Request) {
 	// post request carry request/notification message
 
 	// Check content type
@@ -302,7 +318,7 @@ func (s *StreamableHTTPServer) handlePost(w http.ResponseWriter, r *http.Request
 	session := newStreamableHttpSession(sessionID, s.sessionTools, s.sessionLogLevels)
 
 	// Set the client context before handling the message
-	ctx := s.server.WithContext(r.Context(), session)
+	ctx := server.WithContext(r.Context(), session)
 	if s.contextFunc != nil {
 		ctx = s.contextFunc(ctx, r)
 	}
@@ -356,7 +372,7 @@ func (s *StreamableHTTPServer) handlePost(w http.ResponseWriter, r *http.Request
 	}()
 
 	// Process message through MCPServer
-	response := s.server.HandleMessage(ctx, rawData)
+	response := server.HandleMessage(ctx, rawData)
 	if response == nil {
 		// For notifications, just send 202 Accepted with no body
 		w.WriteHeader(http.StatusAccepted)
@@ -397,7 +413,7 @@ func (s *StreamableHTTPServer) handlePost(w http.ResponseWriter, r *http.Request
 	}
 }
 
-func (s *StreamableHTTPServer) handleGet(w http.ResponseWriter, r *http.Request) {
+func (s *StreamableHTTPServer) handleGet(server *MCPServer, w http.ResponseWriter, r *http.Request) {
 	// get request is for listening to notifications
 	// https://modelcontextprotocol.io/specification/2025-03-26/basic/transports#listening-for-messages-from-the-server
 
@@ -411,11 +427,11 @@ func (s *StreamableHTTPServer) handleGet(w http.ResponseWriter, r *http.Request)
 	}
 
 	session := newStreamableHttpSession(sessionID, s.sessionTools, s.sessionLogLevels)
-	if err := s.server.RegisterSession(r.Context(), session); err != nil {
+	if err := server.RegisterSession(r.Context(), session); err != nil {
 		http.Error(w, fmt.Sprintf("Session registration failed: %v", err), http.StatusBadRequest)
 		return
 	}
-	defer s.server.UnregisterSession(r.Context(), sessionID)
+	defer server.UnregisterSession(r.Context(), sessionID)
 
 	// Register session for sampling response delivery
 	s.activeSessions.Store(sessionID, session)
@@ -932,8 +948,11 @@ func (s *InsecureStatefulSessionIdManager) Terminate(sessionID string) (isNotAll
 }
 
 // NewTestStreamableHTTPServer creates a test server for testing purposes
-func NewTestStreamableHTTPServer(server *MCPServer, opts ...StreamableHTTPOption) *httptest.Server {
-	sseServer := NewStreamableHTTPServer(server, opts...)
-	testServer := httptest.NewServer(sseServer)
+func NewTestStreamableHTTPServer(mcp *MCPServer, opts ...StreamableHTTPOption) *httptest.Server {
+	sseServer := NewStreamableHTTPServer(opts...)
+	testServer := httptest.NewServer(&StreamableHTTPServerHandler{
+		mcpServer:  mcp,
+		httpServer: sseServer,
+	})
 	return testServer
 }
