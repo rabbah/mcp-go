@@ -717,7 +717,7 @@ type ResourceContents interface {
 
 type TextResourceContents struct {
 	// Meta is a metadata object that is reserved by MCP for storing additional information.
-	Meta *Meta `json:"_meta,omitempty"`
+	Meta map[string]interface{} `json:"_meta,omitempty"`
 	// The URI of this resource.
 	URI string `json:"uri"`
 	// The MIME type of this resource, if known.
@@ -731,7 +731,7 @@ func (TextResourceContents) isResourceContents() {}
 
 type BlobResourceContents struct {
 	// Meta is a metadata object that is reserved by MCP for storing additional information.
-	Meta *Meta `json:"_meta,omitempty"`
+	Meta map[string]interface{} `json:"_meta,omitempty"`
 	// The URI of this resource.
 	URI string `json:"uri"`
 	// The MIME type of this resource, if known.

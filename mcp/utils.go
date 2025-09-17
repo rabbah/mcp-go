@@ -705,11 +705,19 @@ func ParseResourceContents(contentMap map[string]any) (ResourceContents, error) 
 
 	mimeType := ExtractString(contentMap, "mimeType")
 
+	var meta map[string]interface{}
+	if metaValue, ok := contentMap["_meta"]; ok {
+		if metaMap, ok := metaValue.(map[string]interface{}); ok {
+			meta = metaMap
+		}
+	}
+
 	if text := ExtractString(contentMap, "text"); text != "" {
 		return TextResourceContents{
 			URI:      uri,
 			MIMEType: mimeType,
 			Text:     text,
+			Meta:     meta,
 		}, nil
 	}
 
@@ -718,6 +726,7 @@ func ParseResourceContents(contentMap map[string]any) (ResourceContents, error) 
 			URI:      uri,
 			MIMEType: mimeType,
 			Blob:     blob,
+			Meta:     meta,
 		}, nil
 	}
 
