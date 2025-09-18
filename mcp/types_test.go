@@ -144,8 +144,19 @@ func TestResourceContentsMetaField(t *testing.T) {
 		name         string
 		inputJSON    string
 		expectedType string
-		expectedMeta map[string]interface{}
+		expectedMeta map[string]any
 	}{
+		{
+			name: "TextResourceContents with empty _meta",
+			inputJSON: `{
+				"uri":"file://empty-meta.txt",
+				"mimeType":"text/plain",
+				"text":"x",
+				"_meta": {}
+			}`,
+			expectedType: "text",
+			expectedMeta: map[string]any{},
+		},
 		{
 			name: "TextResourceContents with _meta field",
 			inputJSON: `{
@@ -160,9 +171,9 @@ func TestResourceContentsMetaField(t *testing.T) {
 				}
 			}`,
 			expectedType: "text",
-			expectedMeta: map[string]interface{}{
+			expectedMeta: map[string]any{
 				"mcpui.dev/ui-preferred-frame-size": []interface{}{"800px", "600px"},
-				"mcpui.dev/ui-initial-render-data": map[string]interface{}{
+				"mcpui.dev/ui-initial-render-data": map[string]any{
 					"test": "value",
 				},
 			},
@@ -180,7 +191,7 @@ func TestResourceContentsMetaField(t *testing.T) {
 				}
 			}`,
 			expectedType: "blob",
-			expectedMeta: map[string]interface{}{
+			expectedMeta: map[string]any{
 				"width":  float64(100), // JSON numbers are always float64
 				"height": float64(100),
 				"format": "PNG",
@@ -211,7 +222,7 @@ func TestResourceContentsMetaField(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Parse the JSON as a generic map first
-			var contentMap map[string]interface{}
+			var contentMap map[string]any
 			err := json.Unmarshal([]byte(tc.inputJSON), &contentMap)
 			require.NoError(t, err)
 
@@ -250,16 +261,119 @@ func TestResourceContentsMetaField(t *testing.T) {
 			marshaledJSON, err := json.Marshal(resourceContent)
 			require.NoError(t, err)
 
-			var marshaledMap map[string]interface{}
+			var marshaledMap map[string]any
 			err = json.Unmarshal(marshaledJSON, &marshaledMap)
 			require.NoError(t, err)
 
 			// Verify _meta field is preserved in marshaled output
+			v, ok := marshaledMap["_meta"]
 			if tc.expectedMeta != nil {
-				assert.Equal(t, tc.expectedMeta, marshaledMap["_meta"])
+				// Special case: empty maps are omitted due to omitempty tag
+				if len(tc.expectedMeta) == 0 {
+					assert.False(t, ok, "_meta should be omitted when empty due to omitempty")
+				} else {
+					require.True(t, ok, "_meta should be present")
+					assert.Equal(t, tc.expectedMeta, v)
+				}
 			} else {
-				assert.Nil(t, marshaledMap["_meta"])
+				assert.False(t, ok, "_meta should be omitted when nil")
 			}
+		})
+	}
+}
+
+func TestParseResourceContentsInvalidMeta(t *testing.T) {
+	tests := []struct {
+		name        string
+		inputJSON   string
+		expectedErr string
+	}{
+		{
+			name: "TextResourceContents with invalid _meta (string)",
+			inputJSON: `{
+				"uri": "file://test.txt",
+				"mimeType": "text/plain",
+				"text": "Hello World",
+				"_meta": "invalid_meta_string"
+			}`,
+			expectedErr: "_meta must be an object",
+		},
+		{
+			name: "TextResourceContents with invalid _meta (number)",
+			inputJSON: `{
+				"uri": "file://test.txt",
+				"mimeType": "text/plain",
+				"text": "Hello World",
+				"_meta": 123
+			}`,
+			expectedErr: "_meta must be an object",
+		},
+		{
+			name: "TextResourceContents with invalid _meta (array)",
+			inputJSON: `{
+				"uri": "file://test.txt",
+				"mimeType": "text/plain",
+				"text": "Hello World",
+				"_meta": ["invalid", "array"]
+			}`,
+			expectedErr: "_meta must be an object",
+		},
+		{
+			name: "TextResourceContents with invalid _meta (boolean)",
+			inputJSON: `{
+				"uri": "file://test.txt",
+				"mimeType": "text/plain",
+				"text": "Hello World",
+				"_meta": true
+			}`,
+			expectedErr: "_meta must be an object",
+		},
+		{
+			name: "TextResourceContents with invalid _meta (null)",
+			inputJSON: `{
+				"uri": "file://test.txt",
+				"mimeType": "text/plain",
+				"text": "Hello World",
+				"_meta": null
+			}`,
+			expectedErr: "_meta must be an object",
+		},
+		{
+			name: "BlobResourceContents with invalid _meta (string)",
+			inputJSON: `{
+				"uri": "file://image.png",
+				"mimeType": "image/png",
+				"blob": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==",
+				"_meta": "invalid_meta_string"
+			}`,
+			expectedErr: "_meta must be an object",
+		},
+		{
+			name: "BlobResourceContents with invalid _meta (number)",
+			inputJSON: `{
+				"uri": "file://image.png",
+				"mimeType": "image/png",
+				"blob": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==",
+				"_meta": 456
+			}`,
+			expectedErr: "_meta must be an object",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Parse the JSON as a generic map first
+			var contentMap map[string]any
+			err := json.Unmarshal([]byte(tc.inputJSON), &contentMap)
+			require.NoError(t, err)
+
+			// Use ParseResourceContents to convert to ResourceContents
+			resourceContent, err := ParseResourceContents(contentMap)
+
+			// Expect an error
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tc.expectedErr)
+			assert.Nil(t, resourceContent)
 		})
 	}
 }
